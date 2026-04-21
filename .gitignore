@@ -1,0 +1,14 @@
+logs/iteration_logs/*
+!logs/iteration_logs/.gitkeep
+
+results/experiments/*
+!results/experiments/.gitkeep
+!results/experiments/index.csv
+
+results/reports/meta/*
+!results/reports/meta/.gitkeep
+
+results/reports/pdf/*
+!results/reports/pdf/.gitkeep
+
+results/legacy_exchange/

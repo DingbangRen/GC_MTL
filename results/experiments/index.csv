@@ -1,0 +1,1 @@
+date,exp_id,dataset,profile,niter,burnin,inner_steps,mean_acceptance,mean_r2,mean_rmse,precision,decision,log_path

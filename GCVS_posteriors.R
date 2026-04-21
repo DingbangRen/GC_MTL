@@ -29,7 +29,7 @@ priorspecification_all <- function(J=J,K=K,
     Psi_ini[j] <- rinvgamma(1,a_psi/2,b_psi/2)
     for(k in 1:K){
       Lambda_ini[j,k] <- qgamma(pnorm(Z_ini[j,k],0,1),shape = alpha,rate = eta) ## F^{-1}(\Phi())
-      Tau_ini[j,k] <- rexp(1,rate = Lambda_ini[j,k])
+      Tau_ini[j,k] <- rexp(1,rate = (Lambda_ini[j,k]^2) / 2)
       Beta_ini[j,k] <- rnorm(1,mean = 0, sd = sqrt(Psi_ini[j]*Tau_ini[j,k])) # note that the sd requires the standard deviation
     }
   }
@@ -63,8 +63,8 @@ priorspecification_allnew <- function(J=J, K=K,
     Z_ini[j,] <- rmvn(n=1, mu = rep(0,K),Sigma=Sigma_ini)[1,] ## drop the rownames
     Psi_ini[j] <- rinvgamma(1,a_psi/2,b_psi/2)
     for(k in 1:K){
-      Lambda_ini[j,k] <- rgamma(1,alpha,eta)
-      Tau_ini[j,k] <- qexp(pnorm(Z_ini[j,k],0,1),rate = Lambda_ini[j,k]) ## F^{-1}(\Phi())
+      Lambda_ini[j,k] <- qgamma(pnorm(Z_ini[j,k],0,1),shape = alpha,rate = eta)
+      Tau_ini[j,k] <- rexp(1,rate = (Lambda_ini[j,k]^2) / 2)
       Beta_ini[j,k] <- rnorm(1,mean = 0, sd = sqrt(Psi_ini[j]*Tau_ini[j,k])) # note that the sd requires the standard deviation
     }
   }
@@ -84,13 +84,14 @@ priorspecification_allnew <- function(J=J, K=K,
 library(extras)
 ## Z转换 检验没问题
 
+clip_probability <- function(p, eps = 1e-12){
+  pmin(pmax(p, eps), 1 - eps)
+}
+
 Z_trans <- function(lambda,shape=alpha,rate=eta){ # transform \lambda_j to z_j
   z <- c()
   for(k in 1:K){
-    if(pgamma(lambda[k],shape,rate)==1){ 
-      p <- round(1 - 1e-16,digits = 16)}else{
-        p <- pgamma(lambda[k],shape,rate)
-      }
+    p <- clip_probability(pgamma(lambda[k],shape,rate))
     z[k] <- qnorm(p,0,1)
   }
   return(z)
@@ -362,11 +363,7 @@ Sigma_PX_posterior_GDP<-function(Lambda,Sigma,shape,rate = eta,lowbar = 1e-07){
   Z <- matrix(0,J,K)
   for(j in 1:J){
     for(k in 1:K){
-      if(pgamma(Lambda[j,k],shape[j,k],rate)==1){
-        pp <- round(1 - 1e-16,digits = 16)
-      }else{
-        pp <- pgamma(Lambda[j,k],shape[j,k],rate)
-      }
+      pp <- clip_probability(pgamma(Lambda[j,k],shape[j,k],rate))
       Z[j,k] <- qnorm(pp,mean=0,sd=1)    
     }
   }
@@ -427,7 +424,15 @@ coth <- function(x,a = 1e+06){
   }
 }
 
-derivative_G_j<- function(lambda,shape,rate = eta){
+make_positive_definite <- function(mat, min_eigenvalue = 1.1e-08){
+  sym_mat <- (mat + t(mat)) / 2
+  eig <- eigen(sym_mat, symmetric = TRUE)
+  eig$values[eig$values < min_eigenvalue] <- min_eigenvalue
+  repaired <- eig$vectors %*% diag(eig$values, nrow = length(eig$values)) %*% t(eig$vectors)
+  (repaired + t(repaired)) / 2
+}
+
+derivative_G_j<- function(lambda,Sigma,shape,rate = eta){
   
   derivative_q <- function(lambda,z,shape,rate = eta){
     gradvec_q <- c()
@@ -450,8 +455,8 @@ derivative_G_j<- function(lambda,shape,rate = eta){
     return(gradvec_q)
   }
   
-  z <- lam_to_z(lambda,shape)
-  Q_t <- Qt_lam_GDP(lambda,z,shape)
+  z <- lam_to_z(lambda,shape,rate = rate)
+  Q_t <- Qt_lam_GDP(lambda,z,shape,rate = rate)
   q <- c()
   for(k in 1:K){
     q[k] <- (z[k]/(dnorm(z[k],0,1))^2) * (dgamma(lambda[k],shape[k],rate))^2 + 
@@ -507,7 +512,7 @@ Delta_H_smooth_lambda <- function(lambda,beta,Sigma,psi,shape,rate = eta,p,a = 1
   ### derivative of G 只与lambda 和 alpha有关，但是使得p过大的原因
   ### 主要在part2的M_j2, 且主要体现在D_j上（因为M_j2 和 M_j1只有D_j不共享）
   ### 可是当p不大的时候 D_j也会大过头
-  der_G_j <- derivative_G_j(lambda,shape)
+  der_G_j <- derivative_G_j(lambda,Sigma,shape,rate = rate)
   part1 <- c()
   part2 <- c()
   for(k in 1:K){
@@ -549,7 +554,7 @@ Delta_H_smooth_lambda <- function(lambda,beta,Sigma,psi,shape,rate = eta,p,a = 1
   ### derivative of G 只与lambda 和 alpha有关，但是使得p过大的原因
   ### 主要在part2的M_j2, 且主要体现在D_j上（因为M_j2 和 M_j1只有D_j不共享）
   ### 可是当p不大的时候 D_j也会大过头
-  der_G_j <- derivative_G_j(lambda,shape)
+  der_G_j <- derivative_G_j(lambda,Sigma,shape,rate = rate)
   part1 <- c()
   part2 <- c()
   
@@ -603,17 +608,14 @@ H_smooth_func <- function(lambda,beta,Sigma,psi,shape,rate = eta,p){
 lam_to_z <- function(lambda,shape,rate=eta){ # transform \lambda_j to z_j
   z <- c()
   for(k in 1:K){
-    if(pgamma(lambda[k],shape[k],rate)==1){ 
-      p <- round(1 - 1e-16,digits = 16)}else{
-        p <- pgamma(lambda[k],shape[k],rate)
-      }
+    p <- clip_probability(pgamma(lambda[k],shape[k],rate))
     z[k] <- qnorm(p,0,1)
   }
   return(z)
 }
 
 Lam_likelihood_GDP <- function(lambda,Sigma,shape,rate=eta){
-  z<- lam_to_z(lambda,shape)
+  z<- lam_to_z(lambda,shape,rate = rate)
   expinner <- t(z) %*% (diag(rep(1,K))-solve(Sigma)) %*% z / 2
   GClikelihood <- pow(det(Sigma),-1/2) * exp(expinner)%>%c()
   lambdalikelihood<-c()
@@ -625,7 +627,7 @@ Lam_likelihood_GDP <- function(lambda,Sigma,shape,rate=eta){
 }
 
 Lam_posterior_GDP <- function(lambda,beta,Sigma,psi,shape,rate=eta){
-  lam_likeli <- Lam_likelihood_GDP(lambda,Sigma,shape)
+  lam_likeli <- Lam_likelihood_GDP(lambda,Sigma,shape,rate = rate)
   beta_likevector <- c()
   for(k in 1:K){
     beta_likevector[k] <- LaplacesDemon::dlaplace( beta[k],location=0, scale = 1 / (lambda[k]/sqrt(psi)) )
@@ -644,8 +646,8 @@ Qt_lam_GDP <- function(lambda,z,shape,rate = eta){
 ## Gradient is obtained under log posterior !!!
 
 Gradient_lambda_GDP <- function(lambda,beta,Sigma,psi,shape,rate=eta){
-  z <- lam_to_z(lambda,shape)
-  Q_t <- Qt_lam_GDP(lambda,z,shape)
+  z <- lam_to_z(lambda,shape,rate = rate)
+  Q_t <- Qt_lam_GDP(lambda,z,shape,rate = rate)
   part1 <- Q_t %*% (diag(1,K)-solve(Sigma)) %*% z %>% c()
   part2 <- (shape-1)/lambda-rate
   part3 <- 1/lambda - abs(beta) / sqrt(psi)
@@ -654,8 +656,8 @@ Gradient_lambda_GDP <- function(lambda,beta,Sigma,psi,shape,rate=eta){
 
 
 Hessian_lambda_GDP <- function(lambda,beta,Sigma,psi,shape, rate = eta){
-  z <- lam_to_z(lambda,shape)
-  Q_t <- Qt_lam_GDP(lambda,z,shape)
+  z <- lam_to_z(lambda,shape,rate = rate)
+  Q_t <- Qt_lam_GDP(lambda,z,shape,rate = rate)
   q <- c()
   for(k in 1:K){
     q[k] <- (z[k]/(dnorm(z[k],0,1))^2)*(dgamma(lambda[k],shape[k],rate))^2 + 
@@ -665,7 +667,7 @@ Hessian_lambda_GDP <- function(lambda,beta,Sigma,psi,shape, rate = eta){
   part1 <- t(Q_t %*% (diag(1,K)-solve(Sigma)) %*% t(Q_t)) +
     diag(q) %*% diag( (diag(1,K)-solve(Sigma)) %*% z %>% c() )
   # isSymmetric(t(Q_t %*% (diag(1,K)-solve(Sigma))%*% t(Q_t))%>%round(digits = 6)): True
-  part2 <- diag((-shape[k])/(lambda)^2)
+  part2 <- diag((-shape)/(lambda)^2)
   return(part1 + part2)
 }
 
@@ -677,10 +679,7 @@ Lam_sample_GDP_joint <- function(Sigma, shape, rate = eta){
   z <- rmvn(n=1, mu = rep(0,K), Sigma)%>% c()
   lambda <- c()
   for(k in 1:K){
-    if(pnorm(z[k],0,1)==1){
-      qq <- round(1 - 1e-16,digits = 16)}else{
-        qq <- pnorm(z[k],0,1)
-      }
+    qq <- clip_probability(pnorm(z[k],0,1))
     lambda[k] <- qgamma(qq,shape = shape[k],rate = rate)
   }
   return(lambda)
@@ -701,7 +700,7 @@ adaptive_simplified_M_MALA_lambda_GDP=function(beta,Sigma,psi,shape,rate = eta,
          opt_rate = 0.7, const_0 = 10, epsconst = 1){
   
   smooth_invG <- function(lambda,beta,Sigma,psi,shape,rate = eta){
-    ori_G <- -Hessian_lambda_GDP(lambda,beta,Sigma,psi,shape,rate = eta)
+    ori_G <- -Hessian_lambda_GDP(lambda,beta,Sigma,psi,shape,rate = rate)
     eigen_G <- eigen(ori_G)
     eigenvalue <- eigen_G$values
     eigenvec <- eigen_G$vectors
@@ -714,7 +713,7 @@ adaptive_simplified_M_MALA_lambda_GDP=function(beta,Sigma,psi,shape,rate = eta,
     ## 
     smooth_inveigen <- diag(1 / (eigenvalue * sapply(eigenvalue,FUN=coth)))
     newinvG <- eigenvec %*% smooth_inveigen %*% t(eigenvec)
-    return(newinvG)
+    return(make_positive_definite(newinvG))
   }
   
   truncation_eps <- function(eps,low = loweps, upper = uppereps){
@@ -724,22 +723,12 @@ adaptive_simplified_M_MALA_lambda_GDP=function(beta,Sigma,psi,shape,rate = eta,
   proposal_para <- function(beta,Sigma,psi,shape,rate = eta,
                             epsilon,lambda){
     
-    newinvG <- smooth_invG(lambda,beta,Sigma,psi,shape,rate = eta)
+    newinvG <- smooth_invG(lambda,beta,Sigma,psi,shape,rate = rate)
     proposal_mean = lambda + 
-      (epsilon^2/2) * ((newinvG) %*% Gradient_lambda_GDP(lambda,beta,Sigma,psi,shape,rate = eta))
+      (epsilon^2/2) * ((newinvG) %*% Gradient_lambda_GDP(lambda,beta,Sigma,psi,shape,rate = rate))
     
     ## 如果newonvG本来就很小 结果因为eps^2，反而shrink to <1e-08
-    proposal_cov = (epsilon^2 * newinvG)  ## round之后 会有很小的eigenvalue -> 0
-    #proposal_cov %>% is.positive.definite()
-    ## force the cov to be symmteric
-    proposal_cov[lower.tri(proposal_cov)] = t(proposal_cov)[lower.tri(proposal_cov)]
-    
-    ## 会存在diag小于1e-08 会被系统判定为0 进而在dmvn中 整个cov是非正定的 （但是半正定）
-    ## 所以可以 (<1e-08) := 1.001e-08
-    if(sum(diag(proposal_cov)<1e-08)!=0){
-      ind <- which(diag(proposal_cov)<1e-08)
-      proposal_cov[ind,ind] <- 1.001e-08 ## 由于系统默认的 正定的判定下限是 1e-08, 故需稍大一点的数字
-    }
+    proposal_cov = make_positive_definite(epsilon^2 * newinvG)
     return(list(c(proposal_mean),proposal_cov))
   }
   
@@ -758,43 +747,25 @@ adaptive_simplified_M_MALA_lambda_GDP=function(beta,Sigma,psi,shape,rate = eta,
     ### 不如随机生成rgamma(5) 或者干脆将其取abs
     eps_set[i] <- epsilon
     ## 如果eps过小 则eps^2 * invG的元素就会过小 即<1e-08, 所以要防止eps过小，truncation的下界要守住
-    new_para <- proposal_para(beta,Sigma,psi,shape,rate = eta,
+    new_para <- proposal_para(beta,Sigma,psi,shape,rate = rate,
                               epsilon = epsilon,old_lambda)
-    ### 会有些落入到negative supp中 
-    if(!new_para[[2]]%>%is.positive.definite()){
-      #tt <- tt + 1
-      next
-    }
     new_lambda <- rmvn(n=1,mu=new_para[[1]],Sigma=new_para[[2]])%>%c()
     
-    if(sum(new_lambda<=0)!= 0){
-      next
+    old_posterior <- Lam_posterior_GDP(old_lambda,beta,Sigma,psi,shape,rate = rate)
+    accrate <- 0
+    log_accrate <- -Inf
+    if(sum(new_lambda<=0) == 0){
+      new_posterior <- Lam_posterior_GDP(new_lambda,beta,Sigma,psi,shape,rate = rate)
+      new_prop_density <- dmvn(new_lambda, mu=new_para[[1]], Sigma=new_para[[2]])
+      old_para <- proposal_para(beta,Sigma,psi,shape,rate = rate,
+                                epsilon = epsilon,new_lambda)
+      old_prop_density <- dmvn(old_lambda, mu=old_para[[1]], Sigma=old_para[[2]])
+      log_accrate = log(new_posterior)+log(old_prop_density) - log(old_posterior) - log(new_prop_density)
+      if(log_accrate%>%is.na()){
+        log_accrate <- log(10^(-7))
+      }
+      accrate = exp(log_accrate)
     }
-    
-    new_posterior <- Lam_posterior_GDP(new_lambda,beta,Sigma,psi,shape)
-    
-    new_prop_density <- dmvn(new_lambda, mu=new_para[[1]], Sigma=new_para[[2]])
-    
-    old_posterior <- Lam_posterior_GDP(old_lambda,beta,Sigma,psi,shape)
-    
-    old_para <- proposal_para(beta,Sigma,psi,shape,rate = eta,
-                              epsilon = epsilon,new_lambda)
-    ## 会出现eigen有< 1e - 08的情况
-    ## 虽然上面程序已经赋值给 < 1e-08的eigen 以 1.001e-08
-    ## 但还是免不了报错
-    if(!old_para[[2]]%>%is.positive.definite()){
-      #tt <- tt + 1
-      next
-    }
-    old_prop_density <- dmvn(old_lambda, mu=old_para[[1]], Sigma=old_para[[2]])
-    ### proposal density太抢戏了 posterior density普遍都很低，但决定acc的 居然是proposal density
-    #accrate = (new_posterior ) / (old_posterior )
-    #accrate = (new_posterior * old_prop_density) / (old_posterior * new_prop_density)
-    log_accrate = log(new_posterior)+log(old_prop_density) - log(old_posterior) - log(new_prop_density)
-    if(log_accrate%>%is.na()){
-      log_accrate <- log(10^(-7))
-    }
-    accrate = exp(log_accrate)
     
     if(i %% epsconst == 0){
       epsilon =  truncation_eps(eps = epsilon + (const_0/i)*(min(accrate,1) - opt_rate))
@@ -836,10 +807,7 @@ adaptive_simplified_M_MALA_Lambda_GDP=function(Beta,Sigma,Psi,shape,rate = eta,#
     z <- rmvn(n=1, mu = rep(0,K), Sigma)%>% c()
     lambda <- c()
     for(k in 1:K){
-      if(pnorm(z[k],0,1)==1){
-        qq <- round(1 - 1e-16,digits = 16)}else{
-          qq <- pnorm(z[k],0,1)
-        }
+      qq <- clip_probability(pnorm(z[k],0,1))
       lambda[k] <- qgamma(qq,shape = shape[k],rate = rate)
     }
     return(lambda)
@@ -849,13 +817,14 @@ adaptive_simplified_M_MALA_Lambda_GDP=function(Beta,Sigma,Psi,shape,rate = eta,#
   Acc_prob <- c()
   eps_set <- c()
   for(j in 1:J){
-    ini_lambda <- shape[j,] / rate + rnorm(K,0,inisd)
+    ini_lambda <- pmax(shape[j,] / rate + rnorm(K,0,inisd), 1e-08)
     #ini_lambda <- Lam_sample_GDP_joint(Sigma = Sigma,shape[j,])
     #ini_lambda <- (shape[j,] / rate )
     
     #ini_lambda <- (shape[j,] / rate ) + rnorm(K,0,0.2)
     #ini_lambda <- rgamma(K,shape=shape, rate = rate)
     samplings <- adaptive_simplified_M_MALA_lambda_GDP (beta=Beta[j,],Sigma=Sigma,psi=Psi[j],shape=shape[j,],
+                                                        rate = rate,
                                                         epsilon = epsilon,
                                                         L=L, ini_lambda = ini_lambda,
                                                         opt_rate = opt_rate, const_0 = const_0,epsconst = epsconst)
@@ -875,14 +844,14 @@ adaptive_full_M_MALA_lambda_GDP <- function(beta,Sigma,psi,shape,rate = eta,
   proposal_para <- function(beta,Sigma,psi,shape,rate = eta,
                             epsilon,lambda){
     
-    oriG_j <- -Hessian_lambda_GDP(lambda,beta,Sigma,psi,shape,rate = eta)
+    oriG_j <- -Hessian_lambda_GDP(lambda,beta,Sigma,psi,shape,rate = rate)
     eigen_G_j <- eigen(oriG_j)
     
     Q_j <- eigen_G_j$vectors
     ori_eigen <- eigen_G_j$values
     R_j <- diag( 1 / (ori_eigen * sapply(ori_eigen,FUN=coth)))
     
-    new_invG <- Q_j %*% R_j %*% t(Q_j)
+    new_invG <- make_positive_definite(Q_j %*% R_j %*% t(Q_j))
     
     J_j <- matrix(0,K,K)
     for(i in 1:(K-1)){
@@ -899,7 +868,7 @@ adaptive_full_M_MALA_lambda_GDP <- function(beta,Sigma,psi,shape,rate = eta,
     ### const / inf = 0, 但得确保分子得是不太大的(通常来讲也不会太大) 否则就是inf / inf -> NaN
     J_j <- J_j + t(J_j) + diag(sapply(ori_eigen,FUN=coth) + ((-4 * ori_eigen) / (exp(a*ori_eigen)-exp(-a*ori_eigen))^2))
     ### 由于oriG是neg Hess, 且derivative也是 delta (-H)
-    der_neg_H_j <- derivative_G_j(lambda,shape)
+  der_neg_H_j <- derivative_G_j(lambda,Sigma,shape,rate = rate)
     
     der_omega_j <- rep(0,K)
     for(k in 1:K){
@@ -916,22 +885,10 @@ adaptive_full_M_MALA_lambda_GDP <- function(beta,Sigma,psi,shape,rate = eta,
     ## 若epsilon过大 还会导致prop mean的元素为负
     
     proposal_mean = lambda + 
-      (epsilon^2/2) * c(new_invG %*% Gradient_lambda_GDP(lambda,beta,Sigma,psi,shape,rate = eta)) +
+      (epsilon^2/2) * c(new_invG %*% Gradient_lambda_GDP(lambda,beta,Sigma,psi,shape,rate = rate)) +
       (epsilon^2/2) * der_omega_j
     
-    proposal_cov = (epsilon^2 * new_invG)  ## round之后 会有很小的eigenvalue -> 0
-    #proposal_cov %>% is.positive.definite()
-    ## force the cov to be symmteric
-    proposal_cov[lower.tri(proposal_cov)] = t(proposal_cov)[lower.tri(proposal_cov)]
-    
-    ## 会存在diag小于1e-08 会被系统判定为0 进而在dmvn中 整个cov是非正定的 （但是半正定）
-    ## 所以可以 (<1e-08) := 1.001e-08
-    if(sum(diag(proposal_cov)<1e-08)!=0){
-      ind <- which(diag(proposal_cov)<1e-08)
-      proposal_cov[ind,ind] <- 1.1e-08 ## 由于系统默认的 正定的判定下限是 1e-08, 故需稍大一点的数字
-      ## 但系统检验positive df 是从eigen value的角度开始的
-      ## 所以最保险的方法是 U^\top |D| U
-    }
+    proposal_cov = make_positive_definite(epsilon^2 * new_invG)
     return(list(c(proposal_mean),proposal_cov))
   }
   
@@ -954,48 +911,24 @@ adaptive_full_M_MALA_lambda_GDP <- function(beta,Sigma,psi,shape,rate = eta,
   for(i in 1:L){
     eps_set[i] <- epsilon
     
-    new_para <- proposal_para(beta,Sigma,psi,shape,rate = eta,
+    new_para <- proposal_para(beta,Sigma,psi,shape,rate = rate,
                               epsilon = epsilon,old_lambda)
     # new_para[[1]]
     #(new_para[[2]]) %>% eigen()
     
-    if(!new_para[[2]]%>%is.positive.definite()){
-      #tt <- tt + 1
-      #### instead of next
-      ## 若只给<1e-08的diag位置赋以1.001e-08 照样会出现semi-definite
-      next
-      #new_para[[2]] <- diag(1e-06,K)
-    }
     new_lambda <- rmvn(n=1,mu=new_para[[1]],Sigma=new_para[[2]])%>%c()
-    
-    if(sum(new_lambda<0)!=0){
-      #### instead of next
-      #new_lambda <- Lam_sample_GDP_joint(Sigma,shape)
-      new_lambda <- shape / rate + rnorm(K,0,0.1)
-      #new_lambda <- rgamma(K,shape,rate=rate)
-    }
-    
-    new_posterior <- Lam_posterior_GDP(new_lambda,beta,Sigma,psi,shape)
-    
-    new_prop_density <- dmvn(new_lambda, mu=new_para[[1]], Sigma=new_para[[2]])
-    
-    old_posterior <- Lam_posterior_GDP(old_lambda,beta,Sigma,psi,shape)
-    
-    old_para <- proposal_para(beta,Sigma,psi,shape,rate = eta,
-                              epsilon = epsilon,new_lambda)
-    ## 会出现eigen有< 1e - 08的情况
-    ## 虽然上面程序已经赋值给 < 1e-08的eigen 以 1.001e-08
-    ## 但还是免不了报错
-    if(!old_para[[2]]%>%is.positive.definite()){
-      #tt <- tt + 1
-      next
-      #old_para[[2]] <- diag(1e-06,K)
-    }
-    old_prop_density <- dmvn(old_lambda, mu=old_para[[1]], Sigma=old_para[[2]])
-    
-    accrate = (new_posterior * old_prop_density) / (old_posterior * new_prop_density)
-    if(accrate%>%is.na()){
-      accrate <- 10^(-7)
+    old_posterior <- Lam_posterior_GDP(old_lambda,beta,Sigma,psi,shape,rate = rate)
+    accrate <- 0
+    if(sum(new_lambda <= 0) == 0){
+      new_posterior <- Lam_posterior_GDP(new_lambda,beta,Sigma,psi,shape,rate = rate)
+      new_prop_density <- dmvn(new_lambda, mu=new_para[[1]], Sigma=new_para[[2]])
+      old_para <- proposal_para(beta,Sigma,psi,shape,rate = rate,
+                                epsilon = epsilon,new_lambda)
+      old_prop_density <- dmvn(old_lambda, mu=old_para[[1]], Sigma=old_para[[2]])
+      accrate = (new_posterior * old_prop_density) / (old_posterior * new_prop_density)
+      if(accrate%>%is.na()){
+        accrate <- 10^(-7)
+      }
     }
     
     if(i %% epsconst == 0){
@@ -1023,18 +956,18 @@ adaptive_full_M_MALA_Lambda_GDP <- function(Beta,Sigma,Psi,shape,rate = eta,#gra
   trial_number = c()
   for(j in 1:J){
     #ini_lambda <- shape[j,] / rate + rnorm(K,0,inisd)
-    ini_lambda <- Lam_sample_GDP_joint(Sigma,shape=shape[j,]) + rnorm(K,0,inisd)
+    ini_lambda <- pmax(Lam_sample_GDP_joint(Sigma,shape=shape[j,], rate = rate) + rnorm(K,0,inisd), 1e-08)
     
-    Lambda_and_Accprob <- adaptive_full_M_MALA_lambda_GDP(beta=Beta[j,],Sigma=Sigma,psi=Psi[j],shape=shape[j,],rate = eta,
+    Lambda_and_Accprob <- adaptive_full_M_MALA_lambda_GDP(beta=Beta[j,],Sigma=Sigma,psi=Psi[j],shape=shape[j,],rate = rate,
                                                           epsilon = epsilon,
                                                           L=L, ini_lambda = ini_lambda,
                                                           opt_rate = opt_rate, const_0 = const_0,epsconst = epsconst)##本来lambda的prior就应该是depends on Sigma的
     
     trial = 1
     while(Lambda_and_Accprob[[2]] <= opt_rate / 2 & trial <= 10){
-      ini_lambda <- Lam_sample_GDP_joint(Sigma,shape=shape[j,]) + rnorm(K,0,inisd)
+      ini_lambda <- pmax(Lam_sample_GDP_joint(Sigma,shape=shape[j,], rate = rate) + rnorm(K,0,inisd), 1e-08)
       
-      Lambda_and_Accprob <- adaptive_full_M_MALA_lambda_GDP(beta=Beta[j,],Sigma=Sigma,psi=Psi[j],shape=shape[j,],rate = eta,
+      Lambda_and_Accprob <- adaptive_full_M_MALA_lambda_GDP(beta=Beta[j,],Sigma=Sigma,psi=Psi[j],shape=shape[j,],rate = rate,
                                                             epsilon = epsilon,
                                                             L=L, ini_lambda = ini_lambda,
                                                             opt_rate = opt_rate, const_0 = const_0,epsconst = epsconst)##本来lambda的prior就应该是depends on Sigma的
@@ -1054,11 +987,7 @@ Sigma_posterior_GDP <- function(Lambda,v_0 = K+1, V_0 = diag(1,K),shape,rate = e
   Z <- matrix(0,J,K)
   for(j in 1:J){
     for(k in 1:K){
-      if(pgamma(Lambda[j,k],shape[j,k],rate)==1){
-        pp <- round(1 - 1e-16,digits = 16)
-      }else{
-        pp <- pgamma(Lambda[j,k],shape[j,k],rate)
-      }
+      pp <- clip_probability(pgamma(Lambda[j,k],shape[j,k],rate))
       Z[j,k] <- qnorm(pp,mean=0,sd=1)    
     }
   }
@@ -1076,11 +1005,7 @@ Sigma_PX_posterior_GDP=function(Lambda,Sigma,shape,rate = eta,lowbar = 1e-07){
   Z <- matrix(0,J,K)
   for(j in 1:J){
     for(k in 1:K){
-      if(pgamma(Lambda[j,k],shape[j,k],rate)==1){
-        pp <- round(1 - 1e-16,digits = 16)
-      }else{
-        pp <- pgamma(Lambda[j,k],shape[j,k],rate)
-      }
+      pp <- clip_probability(pgamma(Lambda[j,k],shape[j,k],rate))
       Z[j,k] <- qnorm(pp,mean=0,sd=1)    
     }
   }

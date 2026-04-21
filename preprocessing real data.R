@@ -1,10 +1,19 @@
 #data preparation for real data
+script_file <- if (!is.null(sys.frames()[[1]]$ofile)) sys.frames()[[1]]$ofile else "preprocessing real data.R"
+repo_root <- dirname(normalizePath(script_file, winslash = "/", mustWork = FALSE))
+raw_data_dir <- normalizePath(
+  Sys.getenv("GCVS_RAW_DATA_DIR", file.path(repo_root, "raw_data")),
+  winslash = "/",
+  mustWork = FALSE
+)
+repo_file <- function(...) file.path(repo_root, ...)
+raw_file <- function(...) file.path(raw_data_dir, ...)
 
 #######Sacros
 library(dplyr)
 {library('R.matlab')
   
-  R.matlab::readMat("C:\\Users\\scott\\Downloads\\sarcos_inv.mat") -> sarcos_data
+  R.matlab::readMat(raw_file("sarcos_inv.mat")) -> sarcos_data
   sarcos_df <- data.frame(sarcos_data)
   
   Y_sarcos <- sarcos_df[,22:28]
@@ -115,17 +124,17 @@ nrow(Y_sarcos)
   
 }
 
-#save(Xlist_sarcos, file = 'C:\\Users\\scott\\Xlist_sarcos.RData')
-#save(Ylist_sarcos, file = 'C:\\Users\\scott\\Ylist_sarcos.RData')
+#save(Xlist_sarcos, file = repo_file("Xlist_sarcos.RData"))
+#save(Ylist_sarcos, file = repo_file("Ylist_sarcos.RData"))
 
-load(file = 'C:\\Users\\scott\\Xlist_sarcos.RData')
-load(file = 'C:\\Users\\scott\\Ylist_sarcos.RData')
+load(file = repo_file("Xlist_sarcos.RData"))
+load(file = repo_file("Ylist_sarcos.RData"))
 
-#save(Xlist_sarcos_test, file = 'C:\\Users\\scott\\Xlist_sarcos_test.RData')
-#save(Ylist_sarcos_test, file = 'C:\\Users\\scott\\Ylist_sarcos_test.RData')
+#save(Xlist_sarcos_test, file = repo_file("Xlist_sarcos_test.RData"))
+#save(Ylist_sarcos_test, file = repo_file("Ylist_sarcos_test.RData"))
 
-load(file = 'C:\\Users\\scott\\Xlist_sarcos_test.RData')
-load(file = 'C:\\Users\\scott\\Ylist_sarcos_test.RData')
+load(file = repo_file("Xlist_sarcos_test.RData"))
+load(file = repo_file("Ylist_sarcos_test.RData"))
 
 X_train = Xlist_sarcos
 Y_train = Ylist_sarcos
@@ -140,7 +149,7 @@ K = length(Ylist_sarcos)
 
 ## schools data experiments
 {
-{schoolsdata <- read.delim('C:\\Users\\scott\\Downloads\\schools original data.txt')
+{schoolsdata <- read.delim(raw_file("schools original data.txt"))
 str(schoolsdata)
 df <- schoolsdata %>% as.matrix()
 ## 第一行数据读不进来 需要补充
@@ -262,11 +271,11 @@ for(j in 1:n_distinct(schools_withdummy$School)){
 Xlist_schools %>% glimpse()
 varnames_schooldata <- colnames(subset(schools_list[[1]],select = -c(School,Score)) %>% as.matrix())
 
-#save(Xlist_schools,file = 'C:\\Users\\scott\\Xlist_schools.RData')
-#save(Ylist_schools,file = 'C:\\Users\\scott\\Ylist_schools.RData')
+#save(Xlist_schools,file = repo_file("Xlist_schools.RData"))
+#save(Ylist_schools,file = repo_file("Ylist_schools.RData"))
 
-load('C:\\Users\\scott\\Xlist_schools.RData')
-load('C:\\Users\\scott\\Ylist_schools.RData')
+load(repo_file("Xlist_schools.RData"))
+load(repo_file("Ylist_schools.RData"))
 
 #######################
 
@@ -346,11 +355,11 @@ str(X_test)
 
 ## isolet
 #-------------------------------------------------------------
-isolet_original_1234 <- read.table(file='C:\\Users\\scott\\Downloads\\isolet1+2+3+4.txt')
+isolet_original_1234 <- read.table(file = raw_file("isolet1+2+3+4.txt"))
 ncol(isolet_original_1234)
 (nrow(isolet_original_1234)+2) / 4
 
-isolet_original_5 <- read.table(file='C:\\Users\\scott\\Downloads\\isolet5.txt')
+isolet_original_5 <- read.table(file = raw_file("isolet5.txt"))
 nrow(isolet_original_5)
 
 
@@ -525,15 +534,15 @@ Ylist_isolet_test[[3]] <- iso3_uni[ran_rows_test_3,pcnum+1] %>% as.matrix()
 Ylist_isolet_test[[4]] <- iso4_uni[ran_rows_test_4,pcnum+1] %>% as.matrix()
 Ylist_isolet_test[[5]] <- iso5_uni[ran_rows_test_5,pcnum+1] %>% as.matrix()
 
-#save(Xlist_isolet_train,file='C:\\Users\\scott\\Xlist_isolet_train.RData')
-#save(Xlist_isolet_test,file='C:\\Users\\scott\\Xlist_isolet_test.RData')
-#save(Ylist_isolet_train,file='C:\\Users\\scott\\Ylist_isolet_train.RData')
-#save(Ylist_isolet_test,file='C:\\Users\\scott\\Ylist_isolet_test.RData')
+#save(Xlist_isolet_train,file = repo_file("Xlist_isolet_train.RData"))
+#save(Xlist_isolet_test,file = repo_file("Xlist_isolet_test.RData"))
+#save(Ylist_isolet_train,file = repo_file("Ylist_isolet_train.RData"))
+#save(Ylist_isolet_test,file = repo_file("Ylist_isolet_test.RData"))
 
-load(file='C:\\Users\\scott\\Xlist_isolet_train.RData')
-load(file='C:\\Users\\scott\\Xlist_isolet_test.RData')
-load(file='C:\\Users\\scott\\Ylist_isolet_train.RData')
-load(file='C:\\Users\\scott\\Ylist_isolet_test.RData')
+load(file = repo_file("Xlist_isolet_train.RData"))
+load(file = repo_file("Xlist_isolet_test.RData"))
+load(file = repo_file("Ylist_isolet_train.RData"))
+load(file = repo_file("Ylist_isolet_test.RData"))
 ###### 为什么X中有这么多相同的rows?????????
 ##### 这会导致ARWUL 生成NA
 

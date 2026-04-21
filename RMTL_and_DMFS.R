@@ -1,6 +1,16 @@
 
 ## RMTL methods
 # create simulated data for regression and classification problem
+script_file <- if (!is.null(sys.frames()[[1]]$ofile)) sys.frames()[[1]]$ofile else "RMTL_and_DMFS.R"
+repo_root <- dirname(normalizePath(script_file, winslash = "/", mustWork = FALSE))
+external_root <- function(envvar, label){
+  path <- Sys.getenv(envvar, "")
+  if (!nzchar(path)) {
+    stop(sprintf("Set %s to the root directory of %s before running this legacy comparison block.", envvar, label))
+  }
+  normalizePath(path, winslash = "/", mustWork = FALSE)
+}
+
 library(RMTL)
 {
 nMSE <- function(X,Y,beta){
@@ -125,22 +135,24 @@ rmtl_type = "Regression"
 #library(NORMT3) not available
 {
   library(doMC)
-  source('C:\\Users\\scott\\Downloads\\R-DMFS\\beta.R')
-  source('C:\\Users\\scott\\Downloads\\R-DMFS\\ep_robust-multi-task-natural_noise.R')
-  source('C:\\Users\\scott\\Downloads\\R-DMFS\\probit.R')
-  source('C:\\Users\\scott\\Downloads\\R-DMFS\\SB_prior.R')
-  source('C:\\Users\\scott\\Downloads\\R-DMFS\\SB_prior_natural.R')
-  source('C:\\Users\\scott\\Downloads\\R-DMFS\\ep_robust-multi-task-natural_noise.R')
+  dmfs_root <- external_root("GCVS_DMFS_ROOT", "the DMFS reference repository")
+  normt3_root <- external_root("GCVS_NORMT3_ROOT", "the NORMT3 dependency")
+  source(file.path(dmfs_root, "beta.R"))
+  source(file.path(dmfs_root, "ep_robust-multi-task-natural_noise.R"))
+  source(file.path(dmfs_root, "probit.R"))
+  source(file.path(dmfs_root, "SB_prior.R"))
+  source(file.path(dmfs_root, "SB_prior_natural.R"))
+  source(file.path(dmfs_root, "ep_robust-multi-task-natural_noise.R"))
   
-  source('C:\\Users\\scott\\Downloads\\NORMT3\\R\\myInitMessages.R')
-  source('C:\\Users\\scott\\Downloads\\NORMT3\\R\\dnormt3.R')
-  source('C:\\Users\\scott\\Downloads\\NORMT3\\R\\dst.R')
-  source('C:\\Users\\scott\\Downloads\\NORMT3\\R\\erf.R')
-  source('C:\\Users\\scott\\Downloads\\NORMT3\\R\\erfc.R')
-  source('C:\\Users\\scott\\Downloads\\NORMT3\\R\\ic1.R')
-  source('C:\\Users\\scott\\Downloads\\NORMT3\\R\\is1.R')
-  source('C:\\Users\\scott\\Downloads\\NORMT3\\R\\normt3ip.R')
-  source('C:\\Users\\scott\\Downloads\\NORMT3\\R\\wofz.R')
+  source(file.path(normt3_root, "R", "myInitMessages.R"))
+  source(file.path(normt3_root, "R", "dnormt3.R"))
+  source(file.path(normt3_root, "R", "dst.R"))
+  source(file.path(normt3_root, "R", "erf.R"))
+  source(file.path(normt3_root, "R", "erfc.R"))
+  source(file.path(normt3_root, "R", "ic1.R"))
+  source(file.path(normt3_root, "R", "is1.R"))
+  source(file.path(normt3_root, "R", "normt3ip.R"))
+  source(file.path(normt3_root, "R", "wofz.R"))
   
   ### 源代码里面的这个原函数用不了 需要简化成以下形式
   erfc <- function(z){
@@ -440,8 +452,9 @@ dmfs_results_simulation$W %>% round(2)
 
 ###########
 {## bayesian kernelized MTL
-  source('C:\\Users\\scott\\Downloads\\Bayesian Kernelized MTL R\\bayesian_multitask_multiple_kernel_learning_train.R')
-  source('C:\\Users\\scott\\Downloads\\Bayesian Kernelized MTL R\\bayesian_multitask_multiple_kernel_learning_test.R')
+  bmtl_root <- external_root("GCVS_BKMTL_ROOT", "the Bayesian Kernelized MTL codebase")
+  source(file.path(bmtl_root, "bayesian_multitask_multiple_kernel_learning_train.R"))
+  source(file.path(bmtl_root, "bayesian_multitask_multiple_kernel_learning_test.R"))
   
   #initalize the parameters of the algorithm
   parameters_bmtmkl <- list()
