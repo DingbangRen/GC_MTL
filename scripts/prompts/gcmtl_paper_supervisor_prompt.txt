@@ -1,0 +1,55 @@
+You are supervising long-running reproducibility work for the GC_MTL project.
+
+Workspace:
+- Code repository: /Users/diren/Documents/GC_MTL_repo_https
+- Manuscript source: /Users/diren/Documents/GC_MTL
+
+Primary goals:
+1. Run the synthetic paper-profile experiment and assess whether the long-chain behavior is acceptable.
+2. Check lambda and Sigma posterior convergence carefully, including:
+   - row-wise lambda acceptance behavior
+   - Sigma trace stability
+   - ESS for representative lambda coordinates and Sigma off-diagonal entries
+3. Compare posterior mean coefficient heatmaps and Sigma correlation summaries against the existing manuscript figures and descriptions.
+4. If the synthetic paper-profile run is aligned with the manuscript, tighten the experiment-section wording in main.tex.
+5. If it is not aligned, prioritize fixing lambda mixing and Sigma PX updating while preserving the core methodology:
+   - GDP marginals
+   - Gaussian copula dependence on lambda
+   - adaptive full MMALA for lambda
+   - PX update for Sigma
+6. Reproduce the real-data experiments enough to demonstrate that the cleaned code path is genuinely reproducible. Start with the cleaned path first, then escalate as stability allows.
+7. Keep the repository synchronized to GitHub with meaningful commits after major milestones.
+
+Constraints:
+- Do not replace the model with a different method.
+- Do not switch away from the current methodological story in the paper unless there is a clear logical bug.
+- Prefer tuning sampler controls, initialization, clipping, stabilization, inner-step counts, adaptation constants, and report generation over changing the model definition.
+- Preserve user changes already in the working tree.
+- The manuscript directory is outside the git repo. You may edit it locally, but note clearly which manuscript changes are local-only.
+
+Required workflow:
+1. Inspect the current repo state and existing cleaned pipeline.
+2. Run the synthetic paper profile from the repository root.
+3. Generate or extend diagnostics for:
+   - lambda acceptance
+   - Sigma traces
+   - ESS
+   - posterior mean heatmap / correlation matrix summaries
+4. Decide:
+   - If convergence and figure alignment are acceptable, update the manuscript experiment text accordingly.
+   - If not, adjust the sampler in a way that remains aligned with the manuscript methodology, rerun, and document what changed.
+5. Run at least one real-data reproducibility pass after the synthetic path is stabilized.
+6. Write or update experiment reports under results/experiments and structured logs under logs/iteration_logs.
+7. Commit and push after each major milestone to the current branch unless a new codex/ branch is clearly better.
+
+Expected outputs:
+- Updated code if tuning is needed
+- Updated reports and diagnostics
+- A concise final summary covering:
+  - whether synthetic paper-profile behavior aligns with the manuscript
+  - whether lambda and Sigma convergence diagnostics are acceptable
+  - what changed in code
+  - what changed in main.tex
+  - what remains unresolved
+
+Begin by checking the current branch, running the synthetic paper profile, and reporting the first convergence diagnostics before making major tuning changes.
