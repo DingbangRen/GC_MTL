@@ -11,7 +11,7 @@ The cleaned path focuses on the core Bayesian sampler:
 - coefficient updates for each task
 - GDP local-scale updates
 - Gaussian-copula dependence updates
-- adaptive full MMALA updates for `lambda`
+- row-wise MMALA updates for `lambda`, with burn-in adaptation and post-burnin fixed-kernel sampling
 - experiment logging, diagnostics, and report generation
 
 ## What was fixed
@@ -21,6 +21,8 @@ Compared with the original committed scripts, the cleaned pipeline now:
 - provides a reproducible command-line entrypoint
 - removes the broken dependency on undefined objects in `Our_MTL_GCVS.R`
 - fixes the `lambda` MMALA kernel so proposals leaving the positive support are rejected instead of silently redrawn from a different law
+- removes acceptance-triggered whole-row restarts from the `lambda` update
+- adapts the `lambda` MMALA step size only during burn-in and freezes it for post-burnin sampling
 - clips the Gamma CDF on both tails before the probit transform, avoiding `qnorm(0)` and `qnorm(1)` failures
 - repairs near-singular proposal metrics numerically before sampling
 - writes structured experiment artifacts following the local AGENTS workflow
@@ -37,6 +39,12 @@ Run the longer paper-style profile:
 
 ```bash
 Rscript scripts/run_gcvs_experiment.R --dataset synthetic --profile paper
+```
+
+Resume a previous experiment from its latest checkpoint:
+
+```bash
+Rscript scripts/run_gcvs_experiment.R --dataset synthetic --profile paper --exp-id <EXP_ID> --resume
 ```
 
 The legacy root-level entrypoint is still available and forwards to the same cleaned pipeline:
@@ -73,12 +81,13 @@ The cleaned driver loads committed `.RData` files from the repository for the re
 ## Repository layout
 
 - `scripts/run_gcvs_experiment.R`: command-line experiment entrypoint
+- `scripts/register_report.R`: register daily, manuscript, or handoff reports into the unified report index
 - `R/gcvs_repro.R`: cleaned orchestration layer, dataset loader, artifact writer, and report generator
 - `GCVS_posteriors.R`: posterior updates and MMALA sampler
 - `Our_MTL_GCVS.R`: compatibility wrapper to the cleaned pipeline
 - `results/README.md`: artifact conventions
 - `results/experiments/index.csv`: machine-readable experiment index
-- `results/reports/index.csv`: human-readable report archive index
+- `results/reports/index.csv`: unified report index for experiment, daily, manuscript, and handoff reports
 
 ## Generated artifacts
 
@@ -90,11 +99,49 @@ Each experiment run writes:
 - `results/experiments/<EXP_ID>/posterior_sigma_mean.csv`
 - `results/experiments/<EXP_ID>/figures/sampling_diagnostics.png`
 - `results/experiments/<EXP_ID>/metadata.json`
+- `results/experiments/<EXP_ID>/progress.json`
+- `results/experiments/<EXP_ID>/checkpoints/checkpoint_latest.rds`
+- `results/experiments/<EXP_ID>/checkpoints/checkpoint_iter_<ITER>.rds` at checkpoint milestones
 - `results/experiments/<EXP_ID>/experiment_report.md`
 - `results/experiments/<EXP_ID>/experiment_report.html` when `pandoc` is available
 - `logs/iteration_logs/YYYYMMDD__<EXP_ID>.md`
 
 The repository tracks the artifact structure and indexes, while transient experiment outputs are ignored by `.gitignore`.
+
+## Unified report layout
+
+There is now a single report home under `results/reports/`.
+
+- Experiment reports remain in `results/experiments/<EXP_ID>/experiment_report.md` and are indexed in `results/reports/index.csv`.
+- Daily synthesis reports should live in `results/reports/daily/<REPORT_ID>/`.
+- Manuscript, theory, and shutdown/handoff bundles should live in `results/reports/artifacts/<REPORT_ID>/`.
+- Archived metadata stays in `results/reports/meta/`, and optional PDF exports stay in `results/reports/pdf/`.
+
+To register a non-experiment report in the same index, use:
+
+```bash
+Rscript scripts/register_report.R \
+  --report-id REPORT-20260421 \
+  --report-type daily \
+  --dataset synthetic \
+  --decision INCONCLUSIVE \
+  --report-path results/reports/daily/REPORT-20260421/report.md \
+  --html-path results/reports/daily/REPORT-20260421/report.html \
+  --pdf-path results/reports/daily/REPORT-20260421/report.pdf \
+  --meta-path results/reports/meta/REPORT-20260421.json
+```
+
+## Checkpoint and handoff workflow
+
+Long runs now maintain a resumable latest checkpoint and a lightweight progress file in the experiment directory. The latest checkpoint is updated every outer iteration, while archived iteration checkpoints are retained at the configured checkpoint cadence.
+
+When preparing to stop a machine or hand work off, generate a compact resume note:
+
+```bash
+scripts/prepare_gcvs_handoff.sh <EXP_ID> [TMUX_SESSION]
+```
+
+This writes `results/experiments/<EXP_ID>/resume_handoff.md` with the latest checkpoint path, progress path, resume command, and an optional captured tail of the tmux session. Checkpoints are git-ignored by default; if a specific checkpoint needs to be synced intentionally, use `git add -f` on that experiment directory.
 
 ## Legacy helper scripts
 

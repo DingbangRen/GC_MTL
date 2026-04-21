@@ -359,7 +359,7 @@ Tau_posteriorGDP=function(Lambda, Beta, Psi){
   return(Tau)
 }
 
-Sigma_PX_posterior_GDP<-function(Lambda,Sigma,shape,rate = eta,lowbar = 1e-07){
+Sigma_PX_posterior_GDP<-function(Lambda,Sigma,shape,rate = eta,lowbar = 1e-07,corr_clip = 0.95){
   Z <- matrix(0,J,K)
   for(j in 1:J){
     for(k in 1:K){
@@ -399,6 +399,8 @@ Sigma_PX_posterior_GDP<-function(Lambda,Sigma,shape,rate = eta,lowbar = 1e-07){
   # same as newD<-diag(sqrt(diag(Omega)),K);Sigma <- solve(newD) %*% Omega %*% solve(newD)
   Sigma<-psych::cor.smooth(cov2cor(Omega)) %>% round(digits = 8)
   # 在极端状态下会出现non-diag上的+ -1 需要被替换
+  offdiag_idx <- row(Sigma) != col(Sigma)
+  Sigma[offdiag_idx] <- pmin(pmax(Sigma[offdiag_idx], -corr_clip), corr_clip)
   
   Sigma[which(matrixcalc::upper.triangle(Sigma) - diag(diag(Sigma),K) == 1, arr.ind = T)] <- 1 - 1e-07
   Sigma[which(matrixcalc::upper.triangle(Sigma) - diag(diag(Sigma),K) == -1, arr.ind = T)] <- -(1 - 1e-07)
@@ -839,7 +841,8 @@ adaptive_simplified_M_MALA_Lambda_GDP=function(Beta,Sigma,Psi,shape,rate = eta,#
 adaptive_full_M_MALA_lambda_GDP <- function(beta,Sigma,psi,shape,rate = eta,
                                             epsilon = 0.01, L = 100, ini_lambda, a = 10^6,
                                             loweps = 0.005, uppereps = 1,
-                                            opt_rate = 0.7, const_0 = 1, epsconst = 1){
+                                            opt_rate = 0.7, const_0 = 1, epsconst = 1,
+                                            adapt_epsilon = TRUE){
   
   proposal_para <- function(beta,Sigma,psi,shape,rate = eta,
                             epsilon,lambda){
@@ -904,9 +907,10 @@ adaptive_full_M_MALA_lambda_GDP <- function(beta,Sigma,psi,shape,rate = eta,
   
   # new_para[[2]]%>%is.positive.semi.definite()
   # epsilon <- 0.0002
+  epsilon <- as.numeric(epsilon)[1]
   old_lambda <- ini_lambda
   acc_num <- 0
-  eps_set <- c()
+  eps_set <- numeric(L)
   #tt <- 1
   for(i in 1:L){
     eps_set[i] <- epsilon
@@ -931,7 +935,7 @@ adaptive_full_M_MALA_lambda_GDP <- function(beta,Sigma,psi,shape,rate = eta,
       }
     }
     
-    if(i %% epsconst == 0){
+    if(isTRUE(adapt_epsilon) && i %% epsconst == 0){
       epsilon =  truncation_eps(eps = epsilon + (const_0/i)*(min(accrate,1) - opt_rate))
     }
     
@@ -941,7 +945,12 @@ adaptive_full_M_MALA_lambda_GDP <- function(beta,Sigma,psi,shape,rate = eta,
     }else{old_lambda <- old_lambda}
   }
   #tt
-  return(list(old_lambda,acc_num / L,mean(eps_set)))
+  return(list(
+    lambda = old_lambda,
+    acceptance = acc_num / L,
+    mean_epsilon = mean(eps_set),
+    final_epsilon = epsilon
+  ))
 }
 
 
@@ -949,37 +958,47 @@ adaptive_full_M_MALA_Lambda_GDP <- function(Beta,Sigma,Psi,shape,rate = eta,#gra
                                             epsilon=1e-01, L=600,a=10^6,
                                             loweps = K^(-1/3)/20, uppereps = 1,
                                             opt_rate = 0.8, const_0 = 10,
-                                            epsconst = 1,inisd=0.1){
+                                            epsconst = 1,inisd=0.1,
+                                            ini_Lambda = NULL,
+                                            row_epsilon = NULL,
+                                            adapt_epsilon = TRUE){
   Lambda <- matrix(0,nrow = J,ncol = K)
   Acc_prob <- c()
-  eps_set <- c()
-  trial_number = c()
+  eps_used <- c()
+  next_row_epsilon <- c()
+  trial_number = rep(1, J)
+  has_ini_matrix <- !is.null(ini_Lambda) && is.matrix(ini_Lambda) &&
+    nrow(ini_Lambda) == J && ncol(ini_Lambda) == K
   for(j in 1:J){
-    #ini_lambda <- shape[j,] / rate + rnorm(K,0,inisd)
-    ini_lambda <- pmax(Lam_sample_GDP_joint(Sigma,shape=shape[j,], rate = rate) + rnorm(K,0,inisd), 1e-08)
-    
-    Lambda_and_Accprob <- adaptive_full_M_MALA_lambda_GDP(beta=Beta[j,],Sigma=Sigma,psi=Psi[j],shape=shape[j,],rate = rate,
-                                                          epsilon = epsilon,
-                                                          L=L, ini_lambda = ini_lambda,
-                                                          opt_rate = opt_rate, const_0 = const_0,epsconst = epsconst)##本来lambda的prior就应该是depends on Sigma的
-    
-    trial = 1
-    while(Lambda_and_Accprob[[2]] <= opt_rate / 2 & trial <= 10){
+    row_has_ini <- has_ini_matrix && all(is.finite(ini_Lambda[j,]))
+    row_eps <- epsilon
+    if(!is.null(row_epsilon) && length(row_epsilon) >= j && is.finite(row_epsilon[j])){
+      row_eps <- as.numeric(row_epsilon[j])
+    }
+    if(row_has_ini){
+      ini_lambda <- pmax(ini_Lambda[j,], 1e-08)
+    }else{
       ini_lambda <- pmax(Lam_sample_GDP_joint(Sigma,shape=shape[j,], rate = rate) + rnorm(K,0,inisd), 1e-08)
-      
-      Lambda_and_Accprob <- adaptive_full_M_MALA_lambda_GDP(beta=Beta[j,],Sigma=Sigma,psi=Psi[j],shape=shape[j,],rate = rate,
-                                                            epsilon = epsilon,
-                                                            L=L, ini_lambda = ini_lambda,
-                                                            opt_rate = opt_rate, const_0 = const_0,epsconst = epsconst)##本来lambda的prior就应该是depends on Sigma的
-      trial = trial + 1
     }
     
-    Lambda[j,] <- Lambda_and_Accprob[[1]]
-    Acc_prob[j] <- Lambda_and_Accprob[[2]]
-    eps_set[j] <- Lambda_and_Accprob[[3]]
-    trial_number[j] <- trial
+    Lambda_and_Accprob <- adaptive_full_M_MALA_lambda_GDP(beta=Beta[j,],Sigma=Sigma,psi=Psi[j],shape=shape[j,],rate = rate,
+                                                          epsilon = row_eps,
+                                                          L=L, ini_lambda = ini_lambda,
+                                                          opt_rate = opt_rate, const_0 = const_0,epsconst = epsconst,
+                                                          adapt_epsilon = adapt_epsilon)##本来lambda的prior就应该是depends on Sigma的
+
+    Lambda[j,] <- Lambda_and_Accprob$lambda
+    Acc_prob[j] <- Lambda_and_Accprob$acceptance
+    eps_used[j] <- Lambda_and_Accprob$mean_epsilon
+    next_row_epsilon[j] <- Lambda_and_Accprob$final_epsilon
   }
-  return(list(Lambda,Acc_prob,eps_set,trial_number))
+  return(list(
+    Lambda = Lambda,
+    Acc_prob = Acc_prob,
+    eps_used = eps_used,
+    next_row_epsilon = next_row_epsilon,
+    trial_number = trial_number
+  ))
 }
 
 
@@ -1001,7 +1020,7 @@ Sigma_posterior_GDP <- function(Lambda,v_0 = K+1, V_0 = diag(1,K),shape,rate = e
 
 
 
-Sigma_PX_posterior_GDP=function(Lambda,Sigma,shape,rate = eta,lowbar = 1e-07){
+Sigma_PX_posterior_GDP=function(Lambda,Sigma,shape,rate = eta,lowbar = 1e-07,corr_clip = 0.95){
   Z <- matrix(0,J,K)
   for(j in 1:J){
     for(k in 1:K){
@@ -1041,6 +1060,8 @@ Sigma_PX_posterior_GDP=function(Lambda,Sigma,shape,rate = eta,lowbar = 1e-07){
   # same as newD<-diag(sqrt(diag(Omega)),K);Sigma <- solve(newD) %*% Omega %*% solve(newD)
   Sigma<-psych::cor.smooth(cov2cor(Omega)) %>% round(digits = 8)
   # 在极端状态下会出现non-diag上的+ -1 需要被替换
+  offdiag_idx <- row(Sigma) != col(Sigma)
+  Sigma[offdiag_idx] <- pmin(pmax(Sigma[offdiag_idx], -corr_clip), corr_clip)
   
   Sigma[which(matrixcalc::upper.triangle(Sigma) - diag(diag(Sigma),K) == 1, arr.ind = T)] <- 1 - 1e-07
   Sigma[which(matrixcalc::upper.triangle(Sigma) - diag(diag(Sigma),K) == -1, arr.ind = T)] <- -(1 - 1e-07)

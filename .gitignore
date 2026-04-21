@@ -1,5 +1,7 @@
 logs/iteration_logs/*
 !logs/iteration_logs/.gitkeep
+logs/tmux/*
+!logs/tmux/.gitkeep
 
 results/experiments/*
 !results/experiments/.gitkeep
@@ -10,5 +12,13 @@ results/reports/meta/*
 
 results/reports/pdf/*
 !results/reports/pdf/.gitkeep
+
+results/reports/daily/*
+!results/reports/daily/.gitkeep
+
+results/reports/artifacts/*
+!results/reports/artifacts/.gitkeep
+
+results/daily_reports/
 
 results/legacy_exchange/
