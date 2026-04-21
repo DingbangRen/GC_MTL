@@ -234,6 +234,14 @@ gcvs_boolean_arg <- function(parsed, key, default = FALSE){
   tolower(as.character(value)[[1]]) %in% c("1", "true", "t", "yes", "y")
 }
 
+gcvs_normalize_sampler_mode <- function(value){
+  normalized <- tolower(gsub("-", "_", gcvs_default_if_null(value, "full")))
+  if (!normalized %in% c("full", "lambda_sigma_only")) {
+    stop("Unsupported sampler mode. Expected one of: full, lambda-sigma-only.")
+  }
+  normalized
+}
+
 gcvs_build_config <- function(parsed){
   defaults <- gcvs_default_config(gcvs_default_if_null(parsed$profile, "smoke"))
   timestamp <- format(Sys.time(), "%Y%m%d-%H%M%S")
@@ -258,6 +266,7 @@ gcvs_build_config <- function(parsed){
     const_0 = gcvs_numeric_arg(parsed, "const-0", defaults$const_0),
     epsconst = gcvs_numeric_arg(parsed, "epsconst", defaults$epsconst),
     inisd = gcvs_numeric_arg(parsed, "inisd", defaults$inisd),
+    sampler_mode = gcvs_normalize_sampler_mode(gcvs_default_if_null(parsed[["sampler-mode"]], "full")),
     seed = gcvs_numeric_arg(parsed, "seed", 123L),
     resume = gcvs_boolean_arg(parsed, "resume", FALSE),
     exp_id = gcvs_default_if_null(
@@ -764,7 +773,7 @@ gcvs_resume_command <- function(config){
 gcvs_validate_resume_config <- function(saved_config, current_config){
   comparable_fields <- c(
     "dataset", "profile", "niter", "burnin", "inner_steps", "sigma_px_steps", "epsilon",
-    "alpha_const", "eta", "a_psi", "b_psi", "a_err", "b_err", "opt_rate",
+    "alpha_const", "eta", "a_psi", "b_psi", "a_err", "b_err", "opt_rate", "sampler_mode",
     "const_0", "epsconst", "inisd", "seed", "exp_id"
   )
 
@@ -893,6 +902,7 @@ gcvs_run_sampler <- function(dataset_info, config, repo_root){
       mean_acceptance = NA_real_,
       mean_step_size = NA_real_,
       max_restarts = NA_real_,
+      sampler_mode = rep(config$sampler_mode, config$niter),
       lambda_phase = NA_character_,
       sigma_12 = NA_real_,
       lambda_min = NA_real_,
@@ -955,15 +965,17 @@ gcvs_run_sampler <- function(dataset_info, config, repo_root){
 
   for (iter in iteration_range) {
     lambda_phase <- if (iter <= config$burnin) "adaptive_burnin" else "fixed_sampling"
-    Errvar <- model$Errvar_posterior(
-      X_train, Y_train, Beta,
-      a_err = config$a_err,
-      b_err = config$b_err,
-      K = K
-    )
-    Beta <- model$Beta_posterior(X_train, Y_train, Errvar, Psi, Tau)
-    Psi <- model$Psi_posterior(Tau, Beta, a_psi = config$a_psi, b_psi = config$b_psi)
-    Tau <- model$Tau_posteriorGDP(Lambda, Beta, Psi)
+    if (identical(config$sampler_mode, "full")) {
+      Errvar <- model$Errvar_posterior(
+        X_train, Y_train, Beta,
+        a_err = config$a_err,
+        b_err = config$b_err,
+        K = K
+      )
+      Beta <- model$Beta_posterior(X_train, Y_train, Errvar, Psi, Tau)
+      Psi <- model$Psi_posterior(Tau, Beta, a_psi = config$a_psi, b_psi = config$b_psi)
+      Tau <- model$Tau_posteriorGDP(Lambda, Beta, Psi)
+    }
 
     lambda_update <- model$adaptive_full_M_MALA_Lambda_GDP(
       Beta = Beta,
@@ -1357,6 +1369,7 @@ gcvs_append_index <- function(run_result, paths){
     exp_id = run_result$config$exp_id,
     dataset = run_result$dataset,
     profile = run_result$config$profile,
+    sampler_mode = run_result$config$sampler_mode,
     niter = run_result$config$niter,
     burnin = run_result$config$burnin,
     inner_steps = run_result$config$inner_steps,
@@ -1415,6 +1428,7 @@ gcvs_write_experiment_report <- function(run_result, paths){
     "## 3. Setup",
     paste("- Dataset:", run_result$dataset),
     paste("- Profile:", run_result$config$profile),
+    paste("- Sampler mode:", gsub("_", "-", run_result$config$sampler_mode)),
     paste("- Outer iterations:", run_result$config$niter),
     paste("- Burn-in:", run_result$config$burnin),
     paste("- Checkpoint cadence (outer iterations):", run_result$config$checkpoint_every),
@@ -1429,6 +1443,11 @@ gcvs_write_experiment_report <- function(run_result, paths){
     "- Corrected the lambda MMALA kernel so invalid-support proposals are rejected rather than repaired with an unmatched fallback draw.",
     "- Replaced acceptance-triggered row restarts with a two-phase lambda sampler: burn-in adaptation followed by post-burnin fixed-kernel MMALA.",
     "- Added two-sided probability clipping before the Gamma-to-Gaussian copula transform and repaired indefinite proposal metrics by eigenvalue flooring.",
+    if (identical(run_result$config$sampler_mode, "lambda_sigma_only")) {
+      "- This diagnostic run held Beta, Psi, and Tau fixed after initialization and updated only lambda and Sigma."
+    } else {
+      "- This run used the full blocked Gibbs-plus-MMALA sampler."
+    },
     "- Added structured artifact writing for summaries, diagnostics, logs, and a reviewable experiment report.",
     "",
     "## 5. Raw Evidence",
@@ -1562,6 +1581,8 @@ gcvs_append_report_index <- function(run_result, paths){
     profile = run_result$config$profile,
     M1_rule = paste0("GDP(alpha=", run_result$config$alpha_const, ",eta=", run_result$config$eta, ")"),
     M2_rule = paste0(
+      gsub("_", "-", run_result$config$sampler_mode),
+      "::",
       "two-phase-MMALA(L=",
       run_result$config$inner_steps,
       ",target=",
@@ -1593,6 +1614,7 @@ gcvs_write_artifacts <- function(run_result, repo_root){
     experiment_id = run_result$config$exp_id,
     dataset = run_result$dataset,
     profile = run_result$config$profile,
+    sampler_mode = run_result$config$sampler_mode,
     niter = run_result$config$niter,
     burnin = run_result$config$burnin,
     inner_steps = run_result$config$inner_steps,
